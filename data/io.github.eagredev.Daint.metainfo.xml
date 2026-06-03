@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.eagredev.Daint</id>
+
+  <name>Daint</name>
+  <summary>A simple, fast paint program for quick doodles</summary>
+
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+
+  <developer id="dev.eagre">
+    <name>eagre.dev</name>
+  </developer>
+
+  <url type="homepage">https://github.com/eagredev/daint</url>
+  <url type="bugtracker">https://github.com/eagredev/daint/issues</url>
+
+  <description>
+    <p>
+      Daint is a deliberately simple raster paint program for when you just
+      want to pull up a canvas and doodle, without the weight of GIMP or the
+      fiddliness of a full image editor.
+    </p>
+    <p>
+      It has the tools you expect and a few that are just fun: pencil, eraser,
+      spray, line, rectangle, ellipse, free-form polygon, flood fill, colour
+      picker, and text, plus a rainbow brush that cycles the spectrum as you
+      draw. A two-colour system (left and right mouse buttons), an editable
+      colour palette, and crisp pixels by default with an optional smooth-edges
+      mode. It opens PNG, JPEG, and BMP images, and saves to PNG.
+    </p>
+    <p>
+      For pixel-level work there is cursor-anchored zoom, an optional grid with a
+      configurable cell size, rulers along the top and left edges, and a live
+      coordinate readout. The canvas is resizable, and undo/redo covers your
+      mistakes.
+    </p>
+  </description>
+
+  <launchable type="desktop-id">io.github.eagredev.Daint.desktop</launchable>
+
+  <screenshots>
+    <screenshot type="default">
+      <caption>A quick canvas to pull up and doodle on</caption>
+      <image>https://raw.githubusercontent.com/eagredev/daint/v0.1.0/data/screenshots/01-icon.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Pixel art with the grid, rulers, and rainbow brush</caption>
+      <image>https://raw.githubusercontent.com/eagredev/daint/v0.1.0/data/screenshots/02-pixelart.png</image>
+    </screenshot>
+  </screenshots>
+
+  <categories>
+    <category>Graphics</category>
+    <category>RasterGraphics</category>
+  </categories>
+
+  <content_rating type="oars-1.1" />
+
+  <releases>
+    <release version="0.1.0" date="2026-06-04">
+      <description>
+        <p>First release: pencil, eraser, line, rectangle, ellipse, flood fill,
+           colour picker, palette, brush size, undo/redo, and image open/save
+           (opens PNG/JPEG/BMP, saves PNG).</p>
+      </description>
+    </release>
+  </releases>
+</component>

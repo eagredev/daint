@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Daint
+GenericName=Paint
+Comment=A simple, fast paint program for quick doodles
+Exec=daint
+Icon=io.github.eagredev.Daint
+Categories=Graphics;2DGraphics;RasterGraphics;
+Keywords=paint;draw;doodle;sketch;image;bitmap;
+Terminal=false
