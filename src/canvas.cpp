@@ -26,7 +26,88 @@
 #include <QTimer>
 #include <QRandomGenerator>
 #include <QPolygonF>
+#include <QFile>
 #include <cmath>
+#include <cstring>
+
+namespace {
+
+// --- PNG chunk surgery, just enough to round-trip a tRNS chunk ---------------
+// A PNG is an 8-byte signature followed by chunks laid out as
+//   [4-byte big-endian length][4-byte type][length bytes of data][4-byte CRC].
+// We never decode pixels here; we only locate/copy whole chunks by type. Qt
+// writes a valid PNG but omits tRNS (per-index alpha), so for a faithful
+// round-trip of an indexed sprite we lift the original file's tRNS chunk and
+// splice it back into Qt's output, just before the first IDAT (the spec
+// requires tRNS to appear after PLTE and before IDAT).
+
+const char kPngSig[8] = { '\x89', 'P', 'N', 'G', '\r', '\n', '\x1a', '\n' };
+
+bool looksLikePng(const QByteArray &b)
+{
+    return b.size() >= 8 && std::memcmp(b.constData(), kPngSig, 8) == 0;
+}
+
+// Find the byte offset of the chunk with `type` (e.g. "tRNS"), or -1. On success
+// also reports the chunk's total length (12 + data length) via `outTotalLen`.
+int findChunk(const QByteArray &png, const char *type, int *outTotalLen = nullptr)
+{
+    int pos = 8;                                   // skip signature
+    while (pos + 8 <= png.size()) {
+        const quint32 dataLen =
+            (quint8(png[pos])     << 24) | (quint8(png[pos + 1]) << 16) |
+            (quint8(png[pos + 2]) << 8)  |  quint8(png[pos + 3]);
+        const int total = 12 + int(dataLen);       // len(4) + type(4) + data + crc(4)
+        if (pos + total > png.size())
+            break;                                 // truncated/corrupt; bail
+        if (std::memcmp(png.constData() + pos + 4, type, 4) == 0) {
+            if (outTotalLen) *outTotalLen = total;
+            return pos;
+        }
+        pos += total;
+    }
+    return -1;
+}
+
+// Read the whole tRNS chunk (length+type+data+crc) from a PNG file, or an empty
+// array if the file has none / isn't a readable PNG.
+QByteArray readTrnsChunk(const QString &path)
+{
+    QFile f(path);
+    if (!f.open(QIODevice::ReadOnly))
+        return {};
+    const QByteArray png = f.readAll();
+    if (!looksLikePng(png))
+        return {};
+    int len = 0;
+    const int at = findChunk(png, "tRNS", &len);
+    if (at < 0)
+        return {};
+    return png.mid(at, len);
+}
+
+} // namespace
+
+// Splice m_srcTrnsChunk into the PNG at `path` (which Qt just wrote), placing it
+// immediately before the first IDAT. No-op if the file isn't a PNG, already has
+// a tRNS, or has no IDAT (all of which mean "nothing safe to do").
+void Canvas::reattachTrns(const QString &path)
+{
+    QFile f(path);
+    if (!f.open(QIODevice::ReadOnly))
+        return;
+    QByteArray png = f.readAll();
+    f.close();
+    if (!looksLikePng(png) || findChunk(png, "tRNS") >= 0)
+        return;                                    // not PNG, or already present
+    const int idat = findChunk(png, "IDAT");
+    if (idat < 0)
+        return;
+
+    png.insert(idat, m_srcTrnsChunk);
+    if (f.open(QIODevice::WriteOnly | QIODevice::Truncate))
+        f.write(png);
+}
 
 Canvas::Canvas(QWidget *parent)
     : QWidget(parent)
@@ -63,6 +144,7 @@ Canvas::Canvas(QWidget *parent)
 
 void Canvas::newImage(const QSize &size, const QColor &fill)
 {
+    leaveIndexed();        // a fresh doodle is never palette-locked
     m_image = QImage(size, QImage::Format_ARGB32_Premultiplied);
     m_image.fill(fill);
 
@@ -109,6 +191,26 @@ bool Canvas::openImage(const QString &path)
     if (!loaded.load(path))
         return false;
 
+    // Indexed sprites (e.g. pokeemerald 4bpp PNGs) need their palette and its
+    // slot order preserved or the file is corrupted on save. Qt loads a 4bpp
+    // indexed PNG as Format_Indexed8 with the colour table intact; enterIndexed
+    // captures that palette and switches the canvas into palette-locked mode
+    // (editing happens in ARGB, see enterIndexed). A plain doodle never hits
+    // this branch. (DESIGN.md §14.)
+    if (loaded.format() == QImage::Format_Indexed8 && !loaded.colorTable().isEmpty()) {
+        if (enterIndexed(loaded, path)) {
+            m_undoStack.clear();
+            m_redoStack.clear();
+            setModified(false);
+            emit historyChanged();
+            applyZoom();
+            return true;
+        }
+        // enterIndexed declined (shouldn't happen given the guard); fall through
+        // to the normal truecolour path rather than failing the open.
+    }
+
+    leaveIndexed();
     m_image = loaded.convertToFormat(QImage::Format_ARGB32_Premultiplied);
     m_undoStack.clear();
     m_redoStack.clear();
@@ -121,10 +223,140 @@ bool Canvas::openImage(const QString &path)
 
 bool Canvas::saveImage(const QString &path)
 {
-    if (!m_image.save(path))
+    if (m_indexed) {
+        // Convert the ARGB editing buffer back to Format_Indexed8 using the
+        // original palette in its original order, so every painted pixel resolves
+        // to its true GBA palette slot and the colour table is byte-preserved.
+        // Threshold (no dither) because the palette is locked: a painted pixel is
+        // already an exact palette colour, and dithering would scatter wrong
+        // indices. This converted image is what gbagfx re-packs to 4bpp.
+        // (DESIGN.md §14, de-risk note 1.)
+        QImage out = m_image.convertToFormat(QImage::Format_Indexed8, m_palette,
+                                             Qt::ThresholdDither | Qt::ThresholdAlphaDither);
+        if (!out.save(path))
+            return false;
+    } else if (!m_image.save(path)) {
         return false;
+    }
+
+    // Qt drops the PNG tRNS (per-index alpha) chunk on save. For the pokeemerald
+    // pipeline that's harmless (transparency is the index-0 palette convention,
+    // not the PNG tRNS), and gbagfx re-derives 4bpp packing from the palette, so
+    // the indices round-trip byte-identically. But to keep a faithful PNG for
+    // any other consumer we splice the original file's tRNS chunk back in.
+    // (DESIGN.md §14, de-risk note 2.)
+    if (m_indexed && !m_srcTrnsChunk.isEmpty() && path.endsWith(".png", Qt::CaseInsensitive))
+        reattachTrns(path);
+
     setModified(false);
     return true;
+}
+
+// ---------------------------------------------------------------------------
+// Indexed-palette (sprite) mode -- see DESIGN.md §14
+// ---------------------------------------------------------------------------
+
+bool Canvas::enterIndexed(const QImage &loaded, const QString &path)
+{
+    if (loaded.colorTable().isEmpty())
+        return false;
+
+    // Capture the palette in slot order BEFORE converting -- the order is the
+    // GBA palette-slot mapping and must survive untouched to the save. We then
+    // edit in ARGB, not Indexed8: Qt's QPainter cannot paint on a Format_Indexed8
+    // image at all (verified -- "Cannot paint on an image with the
+    // Format_Indexed8 format"), so every brush/shape tool would be dead. Instead
+    // we constrain the *colours* to this locked palette while editing in ARGB,
+    // then convert back to Indexed8 with this exact table at save time. That
+    // round-trip is gbagfx-byte-identical (DESIGN.md §14, de-risk note).
+    //
+    // We force the editing palette OPAQUE (alpha stripped from every entry).
+    // pokeemerald's transparent slot (conventionally index 0) carries alpha 0 in
+    // the colour table; left as-is it would (a) make that slot's pixels invisible
+    // and unpaintable in the ARGB buffer, and (b) be ambiguous to match back on
+    // save. By editing with opaque colours, slot 0 is a normal visible, paintable
+    // colour like any other; the real transparency is reconstructed from the
+    // original tRNS chunk we re-attach on save, not from the buffer's alpha. (The
+    // opaque round-trip is verified byte-identical through gbagfx.)
+    const QVector<QRgb> raw = loaded.colorTable();   // slot order preserved
+    m_palette.clear();
+    m_palette.reserve(raw.size());
+    for (QRgb c : raw)
+        m_palette.push_back(qRgb(qRed(c), qGreen(c), qBlue(c)));   // force opaque
+
+    // Convert to ARGB and repaint every pixel as its OPAQUE palette colour, so
+    // formerly-transparent (slot-0) pixels become visible green rather than blank
+    // canvas -- the user paints sprites against the real background colour, the
+    // way the GBA shows it, and nothing is invisible.
+    m_image = loaded.convertToFormat(QImage::Format_ARGB32);
+    for (int y = 0; y < m_image.height(); ++y) {
+        for (int x = 0; x < m_image.width(); ++x) {
+            const int idx = loaded.pixelIndex(x, y);
+            if (idx >= 0 && idx < m_palette.size())
+                m_image.setPixel(x, y, m_palette.at(idx) | 0xff000000u);
+        }
+    }
+    m_indexed = true;
+    m_srcTrnsChunk = readTrnsChunk(path);
+
+    // Anti-aliasing invents in-between colours that aren't palette entries, which
+    // would write garbage indices. Lock it off while indexed (it's already the
+    // crisp default, but a session may have turned it on).
+    m_antialias = false;
+
+    // Seed the two colour slots: Color 1 = first non-transparent entry (index 0
+    // is the conventional transparent/background slot in GBA sprites), Color 2 =
+    // index 0 itself, so right-click erases to "background" as Paint users expect.
+    const int n = m_palette.size();
+    m_secondaryIndex = 0;
+    m_primaryIndex   = (n > 1) ? 1 : 0;
+    m_primaryColor   = paletteColor(m_primaryIndex);
+    m_secondaryColor = paletteColor(m_secondaryIndex);
+    // Rainbow is meaningless against a locked palette; clear any latched flag.
+    m_primaryRainbow = m_secondaryRainbow = false;
+
+    emit indexedModeChanged(true, m_palette);
+    return true;
+}
+
+void Canvas::leaveIndexed()
+{
+    if (!m_indexed) {
+        m_srcTrnsChunk.clear();
+        return;
+    }
+    m_indexed = false;
+    m_palette.clear();
+    m_primaryIndex = m_secondaryIndex = -1;
+    m_srcTrnsChunk.clear();
+    emit indexedModeChanged(false, {});
+}
+
+QColor Canvas::paletteColor(int index) const
+{
+    if (index < 0 || index >= m_palette.size())
+        return QColor();
+    return QColor::fromRgba(m_palette.at(index));
+}
+
+QColor Canvas::setPrimaryPaletteIndex(int index)
+{
+    if (!m_indexed || index < 0 || index >= m_palette.size())
+        return QColor();
+    m_primaryIndex = index;
+    m_primaryColor = paletteColor(index);
+    m_primaryRainbow = false;
+    return m_primaryColor;
+}
+
+QColor Canvas::setSecondaryPaletteIndex(int index)
+{
+    if (!m_indexed || index < 0 || index >= m_palette.size())
+        return QColor();
+    m_secondaryIndex = index;
+    m_secondaryColor = paletteColor(index);
+    m_secondaryRainbow = false;
+    return m_secondaryColor;
 }
 
 // ---------------------------------------------------------------------------
@@ -990,10 +1222,15 @@ void Canvas::floodFill(const QPoint &startPoint, const QColor &newColor)
     const QRgb replacement = newColor.rgba();
 
     // How far a pixel's colour may stray from the clicked colour and still be
-    // filled. ~32 per channel, compared as a squared distance. Large enough to
-    // swallow anti-aliasing ramps; small enough not to bleed across real edges.
-    constexpr int kTolerance = 32;
-    constexpr int kThresholdSq = 3 * kTolerance * kTolerance;
+    // filled, as a squared RGB distance. The tolerance only exists to swallow
+    // anti-aliasing ramps (the grey gradient between an outline and its interior),
+    // so it applies ONLY in smooth mode. In crisp mode -- the default, and the
+    // only mode in indexed/sprite work -- every region is a flat colour, so the
+    // fill must be an EXACT match: otherwise it bleeds across adjacent shades
+    // (e.g. the two near-whites of a sprite's hair merge into one). Indexed mode
+    // is crisp by construction, so distinct palette slots are never merged.
+    const int kTolerance   = m_antialias ? 32 : 0;
+    const int kThresholdSq = 3 * kTolerance * kTolerance;
 
     const int tr = qRed(target), tg = qGreen(target), tb = qBlue(target);
 
@@ -1402,6 +1639,10 @@ void Canvas::setZoom(double factor)
 
 void Canvas::setAntialiasing(bool on)
 {
+    // Indexed mode locks crisp edges: anti-aliasing invents in-between colours
+    // that aren't palette entries, which would convert to wrong indices on save.
+    if (m_indexed)
+        on = false;
     // Affects only future drawing -- existing pixels are not re-rendered.
     m_antialias = on;
 }

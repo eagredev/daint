@@ -117,6 +117,25 @@ public:
     bool    antialiasing() const { return m_antialias; }
     void    setAntialiasing(bool on);
 
+    // --- Indexed-palette (sprite) mode -------------------------------------
+    // True when the document is a palette-indexed image (e.g. a pokeemerald
+    // 4bpp sprite). Editing happens in an ARGB buffer (Qt's QPainter cannot
+    // paint on Format_Indexed8 at all), but the colour choices are locked to the
+    // file's palette and the original colour table (in slot order) is kept so
+    // save can convert back to Format_Indexed8 with the index ORDER intact -- it
+    // is the GBA palette-slot order and is semantically load-bearing. Entered
+    // automatically when openImage loads an indexed PNG; a plain doodle
+    // (newImage, opening a truecolour file) is never indexed. See DESIGN.md §14.
+    bool    isIndexed() const { return m_indexed; }
+    // The palette in slot order. Empty unless isIndexed(). The UI builds its
+    // palette strip from this; the two colour slots reference entries by index.
+    QVector<QRgb> palette() const { return m_palette; }
+    // Set the active colour slot to palette entry `index`. Returns the resolved
+    // QColor so the UI can mirror it in its indicator swatch. Out-of-range or
+    // non-indexed -> no-op, returns an invalid QColor.
+    QColor  setPrimaryPaletteIndex(int index);
+    QColor  setSecondaryPaletteIndex(int index);
+
     // Pixel-art grid: a semi-transparent overlay drawn on top of the canvas with
     // lines every gridWidth x gridHeight IMAGE pixels (so it scales with zoom).
     // Off by default; purely visual (never baked into the image).
@@ -151,6 +170,10 @@ signals:
     void secondaryColorPicked(const QColor &color);
     // Emitted when the zoom factor changes, so the UI can update its readout.
     void zoomChanged(double factor);
+    // Emitted when the document's indexed-mode status changes (e.g. opening an
+    // indexed sprite, or opening a plain image afterwards). The UI swaps its
+    // colour strip for the palette strip (and the status-bar badge) on this.
+    void indexedModeChanged(bool indexed, const QVector<QRgb> &palette);
     // Cursor position over the canvas, in IMAGE-pixel coordinates, for the status
     // bar readout. `cursorLeft` fires when the pointer leaves so the readout can
     // blank. (Position can be outside the image bounds while the pointer is over
@@ -333,6 +356,30 @@ private:
     bool    m_modified   = false;
     double  m_zoom       = 1.0;
     bool    m_antialias  = false;   // crisp edges by default (MS-Paint style)
+
+    // --- Indexed-palette (sprite) mode state -------------------------------
+    // m_indexed: the document is palette-locked. m_palette: the colour table in
+    // slot order (a copy of m_image.colorTable(), kept so the UI doesn't have to
+    // reach into the image). m_primaryIndex/m_secondaryIndex: which palette slot
+    // each colour button currently paints with (so we can keep the painted
+    // colour an EXACT palette entry, and so the picker can report the index).
+    // The path the file was opened from + its original PNG bytes are kept so we
+    // can splice the tRNS chunk back onto Qt's save output (Qt drops it).
+    bool          m_indexed = false;
+    QVector<QRgb> m_palette;
+    int           m_primaryIndex   = -1;
+    int           m_secondaryIndex = -1;
+    QByteArray    m_srcTrnsChunk;   // original PNG's tRNS chunk bytes, or empty
+    // Load an indexed image without converting it, capture its palette, and set
+    // up the two colour slots. Returns false if `loaded` isn't actually indexed.
+    bool enterIndexed(const QImage &loaded, const QString &path);
+    void leaveIndexed();            // drop indexed state (opening a plain image)
+    // Resolve the colour for a palette slot, clamped/guarded. Used by the
+    // setter slots and to keep m_primaryColor/m_secondaryColor in sync.
+    QColor paletteColor(int index) const;
+    // Splice m_srcTrnsChunk back into the PNG just written at `path` (Qt drops
+    // tRNS on save). No-op unless the file is a PNG missing a tRNS.
+    void reattachTrns(const QString &path);
 
     // Pixel-art grid overlay (off by default). Cell size in image pixels.
     bool    m_gridEnabled = false;

@@ -23,6 +23,9 @@
 #include <QVBoxLayout>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QSettings>
+#include <QStandardPaths>
+#include <QDir>
 #include <QGridLayout>
 #include <QHBoxLayout>
 #include <QIcon>
@@ -76,6 +79,8 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_canvas, &Canvas::colorPicked, this, &MainWindow::onColorPicked);
     connect(m_canvas, &Canvas::secondaryColorPicked, this,
             &MainWindow::onSecondaryColorPicked);
+    connect(m_canvas, &Canvas::indexedModeChanged, this,
+            &MainWindow::onIndexedModeChanged);
 
     // Push the initial slot colours into the canvas and paint the swatches.
     setPrimaryColor(m_primaryColor);
@@ -267,14 +272,17 @@ void MainWindow::createToolbar()
 
     bar->addSeparator();
 
-    // Brush size spinner.
+    // Brush size spinner. Kept as a member so indexed mode can default it to 1
+    // (pixel-by-pixel is the common case for sprite work); the valueChanged
+    // connection keeps the canvas brush size in sync, so setting the spinbox is
+    // the single source of truth.
     bar->addWidget(new QLabel(tr(" Size: ")));
-    auto *sizeSpin = new QSpinBox(this);
-    sizeSpin->setRange(1, 64);
-    sizeSpin->setValue(m_canvas->brushSize());
-    connect(sizeSpin, qOverload<int>(&QSpinBox::valueChanged),
+    m_sizeSpin = new QSpinBox(this);
+    m_sizeSpin->setRange(1, 64);
+    m_sizeSpin->setValue(m_canvas->brushSize());
+    connect(m_sizeSpin, qOverload<int>(&QSpinBox::valueChanged),
             m_canvas, &Canvas::setBrushSize);
-    bar->addWidget(sizeSpin);
+    bar->addWidget(m_sizeSpin);
 
     // Text font size, shown ONLY when the Text tool is active (like classic
     // Paint's Fonts toolbar that appeared in text mode). Label + spinbox live in
@@ -319,6 +327,7 @@ void MainWindow::createPalette()
 {
     auto *bar = addToolBar(tr("Colours"));
     bar->setMovable(false);
+    m_colourBar = bar;   // kept so indexed mode can append the palette strip
     addToolBarBreak();   // put the palette on its own row under the tools
 
     // Two overlapping swatches, classic-Paint style: the primary (Color 1) sits
@@ -383,9 +392,13 @@ void MainWindow::createPalette()
             this, &MainWindow::setSecondaryRainbow);
     g->addWidget(m_rainbowSwatch, /*row*/ 0, /*col*/ cols, /*rowSpan*/ 2, 1);
 
-    bar->addWidget(grid);
+    m_colourGrid = grid;          // hidden as a unit while in indexed mode
+    // QToolBar::addWidget wraps the widget in a QWidgetAction; toggling the inner
+    // widget's visibility does NOT hide it on the bar -- we must toggle the
+    // returned action. Keep the actions so indexed mode can swap the strips.
+    m_colourGridAction = bar->addWidget(grid);
 
-    bar->addSeparator();
+    m_colourSepAction = bar->addSeparator();
     // Palette-glyph button (was a text "Edit Colours..."). `color-management` is
     // the Breeze actions icon that reads as a swatch palette and ships at 16/22/32
     // for light + dark; if the theme ever lacks it, fall back to the text label so
@@ -398,7 +411,98 @@ void MainWindow::createPalette()
         more->setIcon(paletteIcon);
     more->setToolTip(tr("Edit Colours: mix a custom colour (added to the custom row)"));
     connect(more, &QPushButton::clicked, this, &MainWindow::chooseColor);
-    bar->addWidget(more);
+    m_editColorsBtn = more;       // hidden while in indexed mode
+    m_editColorsAction = bar->addWidget(more);
+}
+
+// ---------------------------------------------------------------------------
+// Indexed (sprite) mode: a locked palette strip replaces the colour controls
+// ---------------------------------------------------------------------------
+
+// (Re)build the palette strip for `palette`. One small swatch button per entry;
+// left-click sets Color 1 to that index, right-click sets Color 2. Index 0 is
+// shown with a checkerboard hint because it's the conventional transparent slot.
+// The strip is added to the Colours toolbar once and just repopulated thereafter.
+void MainWindow::buildPaletteStrip(const QVector<QRgb> &palette)
+{
+    if (!m_paletteStrip) {
+        m_paletteStrip = new QWidget(this);
+        auto *l = new QHBoxLayout(m_paletteStrip);
+        l->setContentsMargins(0, 0, 0, 0);
+        l->setSpacing(2);
+        m_paletteStripAction = m_colourBar->addWidget(m_paletteStrip);
+        m_paletteStripAction->setVisible(false);   // shown only while indexed
+    }
+
+    // Clear any previous strip contents (a different sprite may have opened).
+    auto *layout = qobject_cast<QHBoxLayout *>(m_paletteStrip->layout());
+    qDeleteAll(m_paletteSlots);
+    m_paletteSlots.clear();
+
+    for (int i = 0; i < palette.size(); ++i) {
+        // Ignore the palette alpha for the swatch fill -- many indexed PNGs carry
+        // alpha 0 on slots (the tRNS/transparent convention), which would render
+        // the swatch invisible. We show the RGB so every slot is visible; the
+        // transparent slot is flagged separately below.
+        const QColor c = QColor(qRed(palette[i]), qGreen(palette[i]),
+                                qBlue(palette[i]));
+        auto *btn = new QPushButton(m_paletteStrip);
+        btn->setFixedSize(20, 20);
+        btn->setCursor(Qt::PointingHandCursor);
+        btn->setContextMenuPolicy(Qt::CustomContextMenu);
+        btn->setToolTip(tr("Palette slot %1\nLeft: Color 1   Right: Color 2")
+                            .arg(i));
+        // Match the proven swatch style (paintSlot): a flat background-color fill
+        // renders correctly under Breeze, where `background:` + gradients on a
+        // QPushButton can be swallowed by native chrome. Index 0 is the GBA
+        // transparent/background slot, so give it a heavier dashed border to set
+        // it apart from a slot that just happens to be this colour.
+        const QString border = (i == 0) ? QStringLiteral("2px dashed #888")
+                                         : QStringLiteral("1px solid #555");
+        btn->setStyleSheet(QStringLiteral("background-color: %1; border: %2;")
+                               .arg(c.name(), border));
+        connect(btn, &QPushButton::clicked, this, [this, i]() {
+            const QColor r = m_canvas->setPrimaryPaletteIndex(i);
+            if (r.isValid()) { m_primaryColor = r; m_primaryRainbow = false;
+                               refreshColorSwatches(); }
+        });
+        connect(btn, &QPushButton::customContextMenuRequested, this, [this, i]() {
+            const QColor r = m_canvas->setSecondaryPaletteIndex(i);
+            if (r.isValid()) { m_secondaryColor = r; m_secondaryRainbow = false;
+                               refreshColorSwatches(); }
+        });
+        layout->addWidget(btn);
+        m_paletteSlots.push_back(btn);
+    }
+}
+
+void MainWindow::onIndexedModeChanged(bool indexed, const QVector<QRgb> &palette)
+{
+    if (indexed) {
+        buildPaletteStrip(palette);
+        // Sprite work is pixel-by-pixel by default; a 1px brush is the sane
+        // starting point. Setting the spinbox propagates to the canvas via its
+        // valueChanged connection. (Leaving indexed mode keeps whatever size the
+        // user last chose, rather than springing back.)
+        if (m_sizeSpin)
+            m_sizeSpin->setValue(1);
+    }
+
+    // Swap the visible colour controls as a unit. The normal doodle controls
+    // (swatch grid, its separator, Edit Colours) hide while indexed; the palette
+    // strip shows. These live on a QToolBar, so we toggle the QWidgetActions
+    // returned by addWidget -- hiding the inner widgets does not hide them on the
+    // bar. The Color 1/Color 2 indicator swatch box stays visible in both modes;
+    // it just reflects palette colours.
+    if (m_colourGridAction)   m_colourGridAction->setVisible(!indexed);
+    if (m_colourSepAction)    m_colourSepAction->setVisible(!indexed);
+    if (m_editColorsAction)   m_editColorsAction->setVisible(!indexed);
+    if (m_paletteStripAction) m_paletteStripAction->setVisible(indexed);
+    if (m_indexedBadge)       m_indexedBadge->setVisible(indexed);
+
+    // Indexed mode locks crisp edges (anti-aliasing would invent off-palette
+    // colours). Mirror that in the indicator swatches.
+    refreshColorSwatches();
 }
 
 // Build one row of colour slots. Click selects (left=Color 1, right=Color 2).
@@ -489,6 +593,20 @@ void MainWindow::createStatusBar()
     connect(m_canvas, &Canvas::cursorLeft, this, [this]() {
         m_coordLabel->clear();
     });
+
+    // Indexed (sprite) mode badge: a small chip shown only while a palette-locked
+    // sprite is open, so the locked palette + disabled rainbow don't look like a
+    // bug. Hidden by default; toggled by onIndexedModeChanged. (DESIGN.md §14.)
+    m_indexedBadge = new QLabel(QStringLiteral("INDEXED"), this);
+    m_indexedBadge->setStyleSheet(QStringLiteral(
+        "QLabel{border:1px solid palette(mid);border-radius:3px;"
+        "padding:0px 5px;color:palette(highlighted-text);"
+        "background:palette(highlight);}"));
+    m_indexedBadge->setToolTip(tr("Indexed-palette sprite: colours are locked to "
+        "the file's palette so it round-trips to the ROM build.\n"
+        "Rainbow and the free colour picker are disabled while indexed."));
+    m_indexedBadge->setVisible(false);
+    sb->addWidget(m_indexedBadge);
 
     // Build the cluster in a container so it sits as one unit on the right.
     auto *zoomWidget = new QWidget(this);
@@ -877,12 +995,34 @@ void MainWindow::resizeCanvas()
     refreshRulerMetrics();
 }
 
+// The directory the open/save dialogs should start in: the folder of the last
+// file the user opened or saved, persisted across launches via QSettings. Falls
+// back to the user's Pictures folder on first run (or if the remembered folder
+// has since gone). Keeping it sticky means repeated sprite edits land straight
+// back in the graphics tree instead of the home directory each time.
+static QString lastDir()
+{
+    QSettings s;
+    const QString remembered = s.value(QStringLiteral("lastDir")).toString();
+    if (!remembered.isEmpty() && QDir(remembered).exists())
+        return remembered;
+    return QStandardPaths::writableLocation(QStandardPaths::PicturesLocation);
+}
+
+static void rememberDir(const QString &filePath)
+{
+    if (filePath.isEmpty())
+        return;
+    QSettings s;
+    s.setValue(QStringLiteral("lastDir"), QFileInfo(filePath).absolutePath());
+}
+
 void MainWindow::openFile()
 {
     if (!maybeSave())
         return;
     const QString path = QFileDialog::getOpenFileName(
-        this, tr("Open Image"), QString(),
+        this, tr("Open Image"), lastDir(),
         tr("Images (*.png *.jpg *.jpeg *.bmp)"));
     if (path.isEmpty())
         return;
@@ -892,6 +1032,7 @@ void MainWindow::openFile()
         return;
     }
     m_currentPath = path;
+    rememberDir(path);
     updateTitle();
     refreshRulerMetrics();
     centerView();
@@ -912,8 +1053,12 @@ bool MainWindow::saveFile()
 
 bool MainWindow::saveFileAs()
 {
+    // Start in the current file's folder if we have one, else the last-used dir.
+    const QString startDir = m_currentPath.isEmpty()
+                                 ? lastDir()
+                                 : QFileInfo(m_currentPath).absolutePath();
     QString path = QFileDialog::getSaveFileName(
-        this, tr("Save Image"), QString(), tr("PNG image (*.png)"));
+        this, tr("Save Image"), startDir, tr("PNG image (*.png)"));
     if (path.isEmpty())
         return false;
     if (!path.endsWith(".png", Qt::CaseInsensitive))
@@ -924,6 +1069,7 @@ bool MainWindow::saveFileAs()
         return false;
     }
     m_currentPath = path;
+    rememberDir(path);
     updateTitle();
     return true;
 }

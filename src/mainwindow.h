@@ -17,9 +17,11 @@
 class Canvas;
 class Ruler;
 class RulerScrollArea;
+class QAction;
 class QActionGroup;
 class QLabel;
 class QSlider;
+class QSpinBox;
 class QPushButton;
 
 // MainWindow owns all the chrome: the tool toolbar, the colour palette, the
@@ -48,6 +50,10 @@ private slots:
     void updateTitle();
     void onColorPicked(const QColor &c);            // eyedropper -> primary
     void onSecondaryColorPicked(const QColor &c);   // eyedropper -> secondary
+    // The canvas entered/left indexed (sprite) mode. Swaps the normal colour
+    // strip for a locked palette strip built from `palette`, and toggles the
+    // status-bar INDEXED badge. See DESIGN.md §14.
+    void onIndexedModeChanged(bool indexed, const QVector<QRgb> &palette);
 
 private:
     void createActions();
@@ -109,6 +115,8 @@ private:
     QLabel       *m_zoomLabel   = nullptr;   // shows the current zoom %
     QLabel       *m_coordLabel  = nullptr;   // left-of-status cursor x,y readout
     QSlider      *m_zoomSlider  = nullptr;   // bottom-right zoom scrubber
+    QSpinBox     *m_sizeSpin    = nullptr;   // brush-size spinner (defaults to 1
+                                             // on entering indexed/sprite mode)
     QAction      *m_fontControlsAction = nullptr;  // toolbar slot for font size
                                                    // (shown only with Text tool)
     QAction      *m_fillControlsAction = nullptr;  // toolbar slot for shape-fill
@@ -137,4 +145,24 @@ private:
     QPushButton *m_rainbowSwatch = nullptr;
     bool         m_primaryRainbow   = false;
     bool         m_secondaryRainbow = false;
+
+    // --- Indexed (sprite) mode UI ------------------------------------------
+    // While indexed, the normal doodle colour controls (the two-row swatch grid,
+    // the rainbow swatch, the Edit Colours button) are hidden and replaced by a
+    // strip of the sprite's locked palette. We keep handles to the swappable
+    // groups so we can show/hide them as a unit, and rebuild the palette strip
+    // each time a new sprite opens. m_indexedBadge is the status-bar chip.
+    void buildPaletteStrip(const QVector<QRgb> &palette);   // (re)populate strip
+    class QToolBar *m_colourBar    = nullptr;   // the "Colours" toolbar
+    QWidget        *m_colourGrid    = nullptr;   // normal preset/custom/rainbow grid
+    QPushButton    *m_editColorsBtn = nullptr;   // "Edit Colours" button
+    QWidget        *m_paletteStrip  = nullptr;   // locked-palette strip (indexed)
+    QVector<QPushButton *> m_paletteSlots;       // its per-entry buttons
+    QLabel         *m_indexedBadge  = nullptr;   // status-bar "INDEXED" chip
+    // The QWidgetActions that wrap the toolbar widgets above. Toolbar widget
+    // visibility is controlled through these actions, not the widgets directly.
+    QAction        *m_colourGridAction   = nullptr;
+    QAction        *m_colourSepAction    = nullptr;
+    QAction        *m_editColorsAction   = nullptr;
+    QAction        *m_paletteStripAction = nullptr;
 };
