@@ -135,6 +135,15 @@ public:
     // non-indexed -> no-op, returns an invalid QColor.
     QColor  setPrimaryPaletteIndex(int index);
     QColor  setSecondaryPaletteIndex(int index);
+    // A *suggested* grid cell size inferred from the image dimensions, for the
+    // Grid Size dialog's "Suggest from image" button. GBA graphics are built from
+    // 8x8 tiles (true for ~99% of the sprite tree), so the floor is 8x8. We return
+    // the largest GBA-legal square (8/16/32/64) that divides BOTH dimensions: that
+    // is the largest tile-block the image could be tiled by. It is a HINT, not
+    // truth -- the real animation-frame size lives in the ROM's OAM data, not the
+    // PNG, so a sheet like 32x64 (two 32x32 frames) and a single 32x64 sprite are
+    // indistinguishable here. Callers must present it as a guess, not assert it.
+    QSize   suggestedGridCell() const;
 
     // Pixel-art grid: a semi-transparent overlay drawn on top of the canvas with
     // lines every gridWidth x gridHeight IMAGE pixels (so it scales with zoom).

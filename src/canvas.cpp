@@ -359,6 +359,35 @@ QColor Canvas::setSecondaryPaletteIndex(int index)
     return m_secondaryColor;
 }
 
+QSize Canvas::suggestedGridCell() const
+{
+    const int w = m_image.width();
+    const int h = m_image.height();
+
+    // Rule 1: a square image is a single square frame (e.g. a 16x16 or 32x32
+    // object sprite). Suggest the whole thing as one cell.
+    if (w == h)
+        return QSize(w, h);
+
+    // Rule 2: the pokeemerald overworld convention. Character sprite sheets are a
+    // ROW of 16-pixel-wide frames at a fixed frame height of 16 or 32 (so a 48x32
+    // sheet like a "cook" is three 16x32 frames; 144x32 is nine). This is the
+    // dominant object_events layout (~98% of that tree). Suggest one frame:
+    // 16 wide x the full image height. Frame *count* isn't in the PNG, but the
+    // frame *cell* is fixed by the convention, so this marks each panel correctly.
+    if (w % 16 == 0 && (h == 16 || h == 32))
+        return QSize(16, h);
+
+    // Rule 3 (fallback): largest GBA-legal square (64/32/16/8) dividing both
+    // dimensions. 8 is the floor -- GBA art is 8x8 tiles, so it is always
+    // meaningful even for an odd size like 24x24.
+    for (int cell : {64, 32, 16, 8}) {
+        if (w % cell == 0 && h % cell == 0)
+            return QSize(cell, cell);
+    }
+    return QSize(8, 8);
+}
+
 // ---------------------------------------------------------------------------
 // Painting the widget
 // ---------------------------------------------------------------------------

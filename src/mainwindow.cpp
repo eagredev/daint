@@ -190,6 +190,25 @@ void MainWindow::createActions()
         form->addRow(tr("Cell width:"), wSpin);
         form->addRow(tr("Cell height:"), hSpin);
 
+        // In indexed (sprite) mode, offer a guess at the cell size from the image
+        // dimensions. It only fills the spinboxes on click -- nothing changes
+        // otherwise -- and the label is explicit that it is a guess, because the
+        // real frame size lives in the ROM, not the PNG (see Canvas::suggestedGridCell).
+        if (m_canvas->isIndexed()) {
+            auto *suggest = new QPushButton(tr("Suggest from image"), &dlg);
+            const QSize g = m_canvas->suggestedGridCell();
+            suggest->setToolTip(tr("Fill in %1x%2, a likely frame/tile size for "
+                                   "this image. It is a guess from the dimensions "
+                                   "(the real frame size lives in the ROM), so "
+                                   "adjust if needed.")
+                                    .arg(g.width()).arg(g.height()));
+            connect(suggest, &QPushButton::clicked, &dlg, [wSpin, hSpin, g]() {
+                wSpin->setValue(g.width());
+                hSpin->setValue(g.height());
+            });
+            form->addRow(QString(), suggest);
+        }
+
         auto *buttons = new QDialogButtonBox(
             QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg);
         connect(buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
