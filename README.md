@@ -9,6 +9,8 @@ fiddliness of a full image editor.
 
 Native KDE app (C++ / Qt6), packaged as a Flatpak.
 
+![The Daint window with a canvas open](data/screenshots/01-icon.png)
+
 ## Install
 
 Download `daint-0.1.0.flatpak` from the
