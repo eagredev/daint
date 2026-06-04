@@ -361,7 +361,7 @@ void MainWindow::createPalette()
 
     // Row 0: presets, seeded from kPalette. Row 1: custom, all white.
     m_presetColors = QVector<QColor>(kPalette.cbegin(), kPalette.cend());
-    m_customColors.assign(cols, QColor(Qt::white));
+    m_customColors = QVector<QColor>(cols, QColor(Qt::white));
     buildColorRow(g, /*gridRow*/ 0, /*row*/ 0, m_presetColors, m_presetSlots);
     buildColorRow(g, /*gridRow*/ 1, /*row*/ 1, m_customColors, m_customSlots);
 
