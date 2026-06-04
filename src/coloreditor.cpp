@@ -27,11 +27,18 @@
 #include <QRegularExpressionValidator>
 #include <QSpinBox>
 #include <QVBoxLayout>
+
+// The "Pick from screen" eyedropper talks to the XDG desktop portal over DBus,
+// which only exists on Linux/Unix. DAINT_HAS_SCREEN_PICKER is defined by CMake
+// on those platforms; elsewhere (e.g. Windows) the feature is omitted and the
+// button is simply not shown.
+#ifdef DAINT_HAS_SCREEN_PICKER
 #include <QDBusConnection>
 #include <QDBusInterface>
 #include <QDBusPendingCallWatcher>
 #include <QDBusPendingReply>
 #include <QDBusArgument>
+#endif
 
 // ===========================================================================
 // HueSatField
@@ -197,15 +204,16 @@ ColorEditor::ColorEditor(const QVector<QColor> &colors, int columns,
     // (under the picker) rather than clustered against OK/Cancel. A QDialogButtonBox
     // ActionRole would pack it tight beside them, so build the row by hand: button,
     // stretch, then the OK/Cancel box pushed to the right.
+    auto *bottomRow = new QHBoxLayout;
+    bottomRow->setContentsMargins(0, 0, 0, 0);
+#ifdef DAINT_HAS_SCREEN_PICKER
     auto *pick = new QPushButton(tr("Pick from screen"), this);
     pick->setIcon(QIcon::fromTheme(QStringLiteral("color-picker")));
     pick->setToolTip(tr("Eyedrop a colour from anywhere on screen"));
     pick->setFocusPolicy(Qt::ClickFocus);
     connect(pick, &QPushButton::clicked, this, &ColorEditor::pickFromScreen);
-
-    auto *bottomRow = new QHBoxLayout;
-    bottomRow->setContentsMargins(0, 0, 0, 0);
     bottomRow->addWidget(pick);
+#endif
     bottomRow->addStretch(1);
     bottomRow->addWidget(buttons);
     outer->addLayout(bottomRow);
@@ -366,7 +374,8 @@ QWidget *ColorEditor::buildPicker()
 // call is async: PickColor returns a request object path, and the chosen colour
 // arrives later on that request's Response signal. The portal draws its own
 // picker UI (so there's no in-app hover preview), and the result is loaded into
-// the picker like any manual edit.
+// the picker like any manual edit. Linux/Unix only (see DAINT_HAS_SCREEN_PICKER).
+#ifdef DAINT_HAS_SCREEN_PICKER
 void ColorEditor::pickFromScreen()
 {
     const QString service   = QStringLiteral("org.freedesktop.portal.Desktop");
@@ -430,6 +439,7 @@ void ColorEditor::onPortalColorResponse(uint response, const QVariantMap &result
     if (c.isValid())
         setCurrent(c, Src::External);   // updates picker + recolours selected swatch
 }
+#endif // DAINT_HAS_SCREEN_PICKER
 
 void ColorEditor::paintSwatch(int index)
 {

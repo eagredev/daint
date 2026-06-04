@@ -10,8 +10,8 @@ permissions:
   contents: read
 
 jobs:
-  build:
-    name: Build (Qt6 / CMake)
+  build-linux:
+    name: Build (Linux / Qt6)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -30,6 +30,45 @@ jobs:
 
       - name: Build
         run: cmake --build build
+
+  build-windows:
+    name: Build (Windows / Qt6)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # On Windows there is no XDG portal, so the screen-picker is compiled out
+      # (CMake only requests Qt6::DBus on Linux). This job proves the app builds
+      # for Windows and produces a runnable .exe; it is NOT a released, tested
+      # build, it guards against Windows-specific build breakage and gives a
+      # downloadable artifact for anyone who wants to try it.
+      - name: Install Qt6
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.7.*'
+          host: windows
+          target: desktop
+          arch: win64_msvc2019_64
+
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build --config Release
+
+      # windeployqt copies the Qt DLLs and plugins next to the binary so it can
+      # run on a machine without Qt installed.
+      - name: Bundle Qt runtime (windeployqt)
+        run: |
+          mkdir dist
+          copy build\Release\daint.exe dist\
+          windeployqt --release --no-translations dist\daint.exe
+
+      - name: Upload Windows build
+        uses: actions/upload-artifact@v4
+        with:
+          name: daint-windows-x64
+          path: dist
 
   metadata:
     name: Packaging metadata

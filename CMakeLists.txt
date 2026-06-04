@@ -9,8 +9,19 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 
-# DBus: the "Pick from screen" eyedropper talks to the XDG desktop portal.
-find_package(Qt6 REQUIRED COMPONENTS Widgets DBus)
+# The "Pick from screen" eyedropper talks to the XDG desktop portal over DBus,
+# which only exists on Linux/Unix. Require (and link) Qt6::DBus only there; on
+# other platforms (e.g. Windows) the feature is compiled out via the
+# DAINT_HAS_SCREEN_PICKER macro and the dependency isn't needed.
+if(UNIX AND NOT APPLE)
+    set(DAINT_SCREEN_PICKER ON)
+endif()
+
+if(DAINT_SCREEN_PICKER)
+    find_package(Qt6 REQUIRED COMPONENTS Widgets DBus)
+else()
+    find_package(Qt6 REQUIRED COMPONENTS Widgets)
+endif()
 
 add_executable(daint
     src/main.cpp
@@ -20,7 +31,12 @@ add_executable(daint
     src/ruler.cpp
 )
 
-target_link_libraries(daint PRIVATE Qt6::Widgets Qt6::DBus)
+target_link_libraries(daint PRIVATE Qt6::Widgets)
+
+if(DAINT_SCREEN_PICKER)
+    target_link_libraries(daint PRIVATE Qt6::DBus)
+    target_compile_definitions(daint PRIVATE DAINT_HAS_SCREEN_PICKER)
+endif()
 
 # --- Installation (used by the Flatpak build) ---------------------------------
 include(GNUInstallDirs)

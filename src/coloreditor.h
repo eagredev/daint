@@ -118,13 +118,16 @@ private:
     void     paintSwatch(int index);
     void     selectSwatch(int index);       // highlight + load into picker
 
-private slots:
     // "Pick from screen" eyedropper: grab a colour from anywhere on screen via
     // the XDG desktop portal, then load it into the picker (and the selected
     // swatch) like any other edit. Async; the result arrives on the portal
-    // Request's Response signal.
+    // Request's Response signal. Linux/Unix only; the portal is DBus-based, so
+    // off those platforms the feature (and its button) are omitted entirely.
+#ifdef DAINT_HAS_SCREEN_PICKER
+private slots:
     void pickFromScreen();
     void onPortalColorResponse(uint response, const QVariantMap &results);
+#endif
 
 private:
 
