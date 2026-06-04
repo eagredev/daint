@@ -1,5 +1,8 @@
 # Daint
 
+[![CI](https://github.com/eagredev/daint/actions/workflows/ci.yml/badge.svg)](https://github.com/eagredev/daint/actions/workflows/ci.yml)
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
+
 A deliberately simple, MS-Paint-style raster paint program for Linux, for when
 you just want to pull up a canvas and doodle, without the weight of GIMP or the
 fiddliness of a full image editor.

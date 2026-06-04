@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build (Qt6 / CMake)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Daint is a Qt6 Widgets app that also talks to the XDG portal over DBus.
+      # The Flatpak build uses the KDE SDK; here we just need the host Qt6 dev
+      # packages to prove the C++ compiles and links.
+      - name: Install Qt6 build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build g++ \
+            qt6-base-dev qt6-base-dev-tools libgl1-mesa-dev libdbus-1-dev
+
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build
+
+  metadata:
+    name: Packaging metadata
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Validate the AppStream metainfo (the store listing) and the .desktop
+      # launcher. --no-net skips the screenshot-URL fetch, which is mirrored by
+      # Flathub at build time and not reachable in CI.
+      - name: Validate AppStream metainfo
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y appstream desktop-file-utils
+          appstreamcli validate --no-net \
+            data/io.github.eagredev.Daint.metainfo.xml
+
+      - name: Validate desktop file
+        run: desktop-file-validate data/io.github.eagredev.Daint.desktop
