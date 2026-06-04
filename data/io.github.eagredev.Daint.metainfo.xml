@@ -42,11 +42,15 @@
   <screenshots>
     <screenshot type="default">
       <caption>A quick canvas to pull up and doodle on</caption>
-      <image>https://raw.githubusercontent.com/eagredev/daint/v0.1.0/data/screenshots/01-icon.png</image>
+      <image>https://raw.githubusercontent.com/eagredev/daint/v0.2.0/data/screenshots/01-icon.png</image>
     </screenshot>
     <screenshot>
       <caption>Pixel art with the grid, rulers, and rainbow brush</caption>
-      <image>https://raw.githubusercontent.com/eagredev/daint/v0.1.0/data/screenshots/02-pixelart.png</image>
+      <image>https://raw.githubusercontent.com/eagredev/daint/v0.2.0/data/screenshots/02-pixelart.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Editing an indexed-palette sprite on its own colours</caption>
+      <image>https://raw.githubusercontent.com/eagredev/daint/v0.2.0/data/screenshots/03-indexed.png</image>
     </screenshot>
   </screenshots>
 
@@ -58,6 +62,19 @@
   <content_rating type="oars-1.1" />
 
   <releases>
+    <release version="0.2.0" date="2026-06-04">
+      <description>
+        <p>Adds an indexed-palette mode for editing sprites. Opening a
+           palette-indexed PNG keeps it on its palette instead of converting to
+           RGB, so it can be saved back without changing the colour table or its
+           order. The colour controls are replaced by the image's own palette
+           while editing, and a grid-size suggestion helps line the grid up with
+           a sprite's tiles or frames.</p>
+        <p>The flood fill now matches colours exactly when smoothing is off, so
+           it no longer spreads across similar shades, and the open and save
+           dialogs remember the last folder used.</p>
+      </description>
+    </release>
     <release version="0.1.0" date="2026-06-04">
       <description>
         <p>First release: pencil, eraser, line, rectangle, ellipse, flood fill,
