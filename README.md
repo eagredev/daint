@@ -6,6 +6,22 @@ fiddliness of a full image editor.
 
 Native KDE app (C++ / Qt6), packaged as a Flatpak.
 
+## Install
+
+Download `daint-0.1.0.flatpak` from the
+[latest release](https://github.com/eagredev/daint/releases/latest), then:
+
+```sh
+# One-time, only if you don't already have Flathub set up. This provides the
+# shared KDE runtime Daint needs; Daint itself is not on Flathub.
+flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+
+flatpak install --user daint-0.1.0.flatpak
+flatpak run io.github.eagredev.Daint
+```
+
+To build it yourself instead, see [Building & running](#building--running) below.
+
 ## What it does
 
 - **Tools:** pencil, eraser, spray/airbrush, line, rectangle, ellipse, free-form
@@ -87,11 +103,15 @@ pixel-snapped so the on-canvas preview matches the committed result exactly.
 
 ## Status
 
-Capable and pleasant to use: a full tool set (including the rainbow brush, spray,
-and free-form polygon), an editable palette, a resizable canvas, and pixel-art
-aids (grid + rulers). The app icon, store screenshots, and AppStream metadata are
-done, and it passes `flatpak-builder-lint` locally. A Flathub submission is the
-next step.
+Released as v0.1.0, see the [latest release](https://github.com/eagredev/daint/releases/latest)
+for the installable Flatpak bundle. The tool set is complete (pencil, eraser,
+spray, line, rectangle, ellipse, free-form polygon, fill, picker, text, plus the
+rainbow brush), with an editable palette, a resizable canvas, and pixel-art aids
+(grid + rulers).
+
+Known gap: Daint works in RGB, so it does not yet round-trip indexed-palette PNGs
+(the format used by some sprite pipelines). Indexed-palette support is the planned
+next feature.
 
 ## License
 

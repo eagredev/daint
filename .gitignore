@@ -21,3 +21,8 @@ IDEAS.md
 
 # Release bundle artifacts
 *.flatpak
+
+# Scratch / throwaway test dirs
+.idxtest/
+
+data/screenshots/README.md
